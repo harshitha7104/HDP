@@ -1,9 +1,9 @@
 flask
 flask-cors
-xgboost
+torch
 scikit-learn
 pandas
 numpy
 matplotlib
+streamlit
 gunicorn
-

@@ -2,7 +2,7 @@
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1xJSWtuuIxKvq5-ZcQG7btZZC0L8tt6XU#scrollTo=qlOyZdxdSow7)
 ![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python)
-![XGBoost](https://img.shields.io/badge/XGBoost-Classifier-orange)
+![PyTorch](https://img.shields.io/badge/PyTorch-Neural%20Network-red?logo=pytorch)
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-red?logo=streamlit)
 ![Flask](https://img.shields.io/badge/Flask-API-black?logo=flask)
 
@@ -12,7 +12,7 @@
 
 ## 📌 Overview
 
-A machine learning web application that predicts the likelihood of heart disease based on 11 patient health inputs. Three models were trained and compared — the best performing model (Random Forest) is used for analysis, while the deployed app uses a pre-trained XGBoost model.
+A deep learning web application that predicts the likelihood of heart disease based on 11 patient health inputs. The model is a **feedforward neural network** built with PyTorch, trained on 918 patient records.
 
 The project ships with **two frontends**:
 - A **Streamlit app** for quick local use
@@ -20,30 +20,40 @@ The project ships with **two frontends**:
 
 ---
 
-## 🤖 Models & Results
+## 🤖 Model & Results
 
-Three classifiers were trained on an 80/20 train/test split (734 train, 184 test):
+A **3-hidden-layer feedforward neural network** trained on an 80/20 train/test split (734 train, 184 test):
 
-| Model | Accuracy |
-|---|---|
-| Decision Tree (max_depth=3) | 86.41% |
-| XGBoost | 86.96% |
-| **Random Forest** | **89.13%** ✅ Best |
-
-**XGBoost Confusion Matrix** (deployed model):
+### Architecture
 
 ```
-                  Predicted: No Disease   Predicted: Disease
-Actual: No Disease        72                     9
-Actual: Disease           15                    88
+Input (20 features)
+    ↓
+Linear(20 → 64) + BatchNorm + ReLU + Dropout(30%)
+    ↓
+Linear(64 → 32) + BatchNorm + ReLU + Dropout(20%)
+    ↓
+Linear(32 → 16) + ReLU
+    ↓
+Linear(16 → 1) + Sigmoid  →  probability (0–1)
 ```
+
+### Performance
 
 | Metric | Score |
 |---|---|
-| Precision | 91% |
-| Recall | 85% |
-| F1 Score | 88% |
-| Overall Accuracy | 87% |
+| **Accuracy** | **89.67%** |
+| Precision | 90% |
+| Recall | 90% |
+| F1 Score | 90% |
+
+**Confusion Matrix:**
+
+```
+                  Predicted: No Disease   Predicted: Disease
+Actual: No Disease        70                    11
+Actual: Disease            8                    95
+```
 
 ---
 
@@ -74,16 +84,22 @@ Actual: Disease           15                    88
 The 5 categorical columns are **one-hot encoded** using `pd.get_dummies()`, expanding the feature space from 12 → **20 columns**:
 
 ```
-Sex="M"            →  Sex_M=1, Sex_F=0
+Sex="M"             →  Sex_M=1, Sex_F=0
 ChestPainType="ASY" →  ChestPainType_ASY=1, others=0
 ...
 ```
 
-### 2. Training (`run_model.py`)
-All three models are trained and evaluated. Results and a confusion matrix are printed to the console.
+### 2. Feature Scaling
+All 20 features are normalised using `StandardScaler` (mean=0, std=1). This is critical for neural networks — without it, features with large values (e.g. `RestingBP=140`) would dominate over small ones (e.g. `Oldpeak=1.2`).
 
-### 3. Inference
-The saved `xgboost_model.pkl` is loaded at runtime. User inputs are preprocessed into the same 20-feature format and passed to `xgb.DMatrix` for prediction. Output is a probability (0–1); values above **0.5** are classified as High Risk.
+### 3. Training (`run_model.py`)
+The neural network is trained for 300 epochs using:
+- **Loss:** Binary Cross Entropy (`BCELoss`)
+- **Optimiser:** Adam (`lr=1e-3`, `weight_decay=1e-4`)
+- **Scheduler:** StepLR — halves learning rate every 100 epochs
+
+### 4. Inference
+The saved `nn_model.pkl` and `scaler.pkl` are loaded at runtime. User inputs are preprocessed into the same 20-feature format, scaled, converted to a PyTorch tensor, and passed through the network. Output is a probability (0–1); values above **0.5** are classified as High Risk.
 
 ---
 
@@ -91,12 +107,15 @@ The saved `xgboost_model.pkl` is loaded at runtime. User inputs are preprocessed
 
 ```
 ├── heart.csv                  # Raw dataset (918 records)
-├── run_model.py               # Train & evaluate all 3 models
-├── xgboost_model.pkl          # Pre-trained XGBoost model
+├── run_model.py               # Train neural network, evaluate, save model
+├── train_nn.py                # Standalone neural network trainer
+├── nn_model.pkl               # Saved PyTorch neural network
+├── scaler.pkl                 # Saved StandardScaler (required at inference)
 ├── streamlit_app.py           # Streamlit frontend
 ├── app.py                     # Flask API backend
 ├── templates/
 │   └── index.html             # Flask HTML frontend
+├── heart_disease_predictor.ipynb  # Jupyter notebook (full walkthrough)
 ├── requirements.txt
 └── procfile                   # Deployment config (Render)
 ```
@@ -105,23 +124,25 @@ The saved `xgboost_model.pkl` is loaded at runtime. User inputs are preprocessed
 
 ## 🚀 Running Locally
 
-### Streamlit App
+### Step 1 — Train the Neural Network
 ```bash
 pip install -r requirements.txt
+python run_model.py
+```
+This trains the model and saves `nn_model.pkl` + `scaler.pkl`.
+
+### Step 2 — Launch the App
+
+**Streamlit:**
+```bash
 streamlit run streamlit_app.py
 ```
 
-### Flask App
+**Flask:**
 ```bash
-pip install -r requirements.txt
 python app.py
 ```
 Then open http://localhost:5000
-
-### Train Models from Scratch
-```bash
-python run_model.py
-```
 
 ---
 
@@ -130,7 +151,7 @@ python run_model.py
 ```
 flask
 flask-cors
-xgboost
+torch
 scikit-learn
 pandas
 numpy
