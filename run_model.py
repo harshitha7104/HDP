@@ -1,75 +1,127 @@
+import pickle
 import numpy as np
 import pandas as pd
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
+import torch
+import torch.nn as nn
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from xgboost import XGBClassifier
 
 RANDOM_STATE = 55
+torch.manual_seed(RANDOM_STATE)
 
-# Load and preprocess
+# ── 1. Load & preprocess ──────────────────────────────────────────────────────
 df = pd.read_csv('heart.csv')
 cat_variables = ['Sex', 'ChestPainType', 'RestingECG', 'ExerciseAngina', 'ST_Slope']
 df = pd.get_dummies(data=df, prefix=cat_variables, columns=cat_variables)
 
 features = [x for x in df.columns if x != 'HeartDisease']
-X_train, X_val, y_train, y_val = train_test_split(
-    df[features], df['HeartDisease'], train_size=0.8, random_state=RANDOM_STATE
-)
+X = df[features].values.astype(np.float32)
+y = df['HeartDisease'].values.astype(np.float32)
 
+X_train, X_val, y_train, y_val = train_test_split(
+    X, y, train_size=0.8, random_state=RANDOM_STATE
+)
 print(f"Train samples: {len(X_train)} | Test samples: {len(X_val)}\n")
 
-# --- Decision Tree (tuned: min_samples_split=50, max_depth=3) ---
-dt_model = DecisionTreeClassifier(min_samples_split=50, max_depth=3, random_state=RANDOM_STATE)
-dt_model.fit(X_train, y_train)
-dt_preds = dt_model.predict(X_val)
+# ── 2. Scale features ─────────────────────────────────────────────────────────
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_val   = scaler.transform(X_val)
 
-# --- Random Forest ---
-rf_model = RandomForestClassifier(random_state=RANDOM_STATE)
-rf_model.fit(X_train, y_train)
-rf_preds = rf_model.predict(X_val)
+X_train_t = torch.tensor(X_train, dtype=torch.float32)
+y_train_t = torch.tensor(y_train, dtype=torch.float32).unsqueeze(1)
+X_val_t   = torch.tensor(X_val,   dtype=torch.float32)
+y_val_t   = torch.tensor(y_val,   dtype=torch.float32).unsqueeze(1)
 
-# --- XGBoost ---
-xgb_model = XGBClassifier(random_state=RANDOM_STATE, eval_metric='logloss')
-xgb_model.fit(X_train, y_train)
-xgb_preds = xgb_model.predict(X_val)
+# ── 3. Neural Network ─────────────────────────────────────────────────────────
+class HeartNet(nn.Module):
+    def __init__(self, input_dim=20):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
 
-# --- Accuracy Summary ---
-print("=" * 50)
-print("MODEL ACCURACY ON TEST DATA")
-print("=" * 50)
-print(f"Decision Tree : {accuracy_score(y_val, dt_preds):.4f}")
-print(f"Random Forest : {accuracy_score(y_val, rf_preds):.4f}")
-print(f"XGBoost       : {accuracy_score(y_val, xgb_preds):.4f}")
+            nn.Linear(64, 32),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(0.2),
 
-# --- Detailed Report (XGBoost) ---
+            nn.Linear(32, 16),
+            nn.ReLU(),
+
+            nn.Linear(16, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+model     = HeartNet(input_dim=X_train.shape[1])
+criterion = nn.BCELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.5)
+
+# ── 4. Training loop ──────────────────────────────────────────────────────────
+EPOCHS = 300
+print(f"Training Neural Network for {EPOCHS} epochs...\n")
+
+for epoch in range(1, EPOCHS + 1):
+    model.train()
+    optimizer.zero_grad()
+    preds = model(X_train_t)
+    loss  = criterion(preds, y_train_t)
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
+
+    if epoch % 50 == 0:
+        model.eval()
+        with torch.no_grad():
+            val_preds = model(X_val_t)
+            val_loss  = criterion(val_preds, y_val_t).item()
+            val_acc   = accuracy_score(y_val, (val_preds.numpy() > 0.5).astype(int))
+        print(f"Epoch {epoch:3d} | Train Loss: {loss.item():.4f} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
+
+# ── 5. Final evaluation ───────────────────────────────────────────────────────
+model.eval()
+with torch.no_grad():
+    val_probs = model(X_val_t).numpy().flatten()
+    val_preds = (val_probs > 0.5).astype(int)
+
 print("\n" + "=" * 50)
-print("XGBOOST CLASSIFICATION REPORT")
+print("NEURAL NETWORK ACCURACY ON TEST DATA")
 print("=" * 50)
-print(classification_report(y_val, xgb_preds, target_names=["No Disease", "Disease"]))
+print(f"Accuracy: {accuracy_score(y_val, val_preds):.4f}")
 
-# --- Confusion Matrix (XGBoost) ---
-print("XGBOOST CONFUSION MATRIX")
+print("\n" + "=" * 50)
+print("CLASSIFICATION REPORT")
 print("=" * 50)
-cm = confusion_matrix(y_val, xgb_preds)
+print(classification_report(y_val, val_preds, target_names=["No Disease", "Disease"]))
+
+print("CONFUSION MATRIX")
+print("=" * 50)
+cm = confusion_matrix(y_val, val_preds)
 print(f"                Predicted No  Predicted Yes")
 print(f"Actual No       {cm[0][0]:^13} {cm[0][1]:^13}")
 print(f"Actual Yes      {cm[1][0]:^13} {cm[1][1]:^13}")
 
-# --- Per-sample predictions on test data ---
+# ── 6. Per-sample predictions (first 20) ─────────────────────────────────────
 print("\n" + "=" * 50)
 print("SAMPLE PREDICTIONS ON TEST DATA (first 20 rows)")
 print("=" * 50)
-results = X_val.copy()
-results['Actual'] = y_val.values
-results['DT_Pred'] = dt_preds
-results['RF_Pred'] = rf_preds
-results['XGB_Pred'] = xgb_preds
-results['XGB_Correct'] = (results['Actual'] == results['XGB_Pred']).map({True: 'OK', False: 'WRONG'})
-
-display_cols = ['Actual', 'DT_Pred', 'RF_Pred', 'XGB_Pred', 'XGB_Correct']
-print(results[display_cols].head(20).to_string())
+results = pd.DataFrame({'Actual': y_val, 'NN_Pred': val_preds})
+results['Correct'] = (results['Actual'] == results['NN_Pred']).map({True: 'OK', False: 'WRONG'})
+print(results.head(20).to_string())
 
 print(f"\nTotal test samples: {len(X_val)}")
-print(f"XGBoost correct predictions: {(y_val.values == xgb_preds).sum()} / {len(X_val)}")
+print(f"Correct predictions: {(y_val == val_preds).sum()} / {len(X_val)}")
+
+# ── 7. Save ───────────────────────────────────────────────────────────────────
+with open("nn_model.pkl", "wb") as f:
+    pickle.dump(model, f)
+with open("scaler.pkl", "wb") as f:
+    pickle.dump(scaler, f)
+print("\nSaved: nn_model.pkl and scaler.pkl")
