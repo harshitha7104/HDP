@@ -34,19 +34,24 @@ class HeartNet(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-
+a
 # ── Load model + scaler ───────────────────────────────────────────────────────
+
 try:
     with open('nn_model.pkl', 'rb') as f:
         model = pickle.load(f)
     model.eval()
+
     with open('scaler.pkl', 'rb') as f:
         scaler = pickle.load(f)
+
     print("Neural network model loaded successfully!")
-except FileNotFoundError as e:
-    print(f"Error: {e}. Run train_nn.py first.")
+
+except Exception as e:
+    print(f"Error loading model: {e}")
     model = None
     scaler = None
+
 
 FEATURE_NAMES = [
     'Age', 'RestingBP', 'Cholesterol', 'FastingBS', 'MaxHR', 'Oldpeak',
