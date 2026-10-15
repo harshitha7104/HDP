@@ -6,7 +6,7 @@
 ![Streamlit](https://img.shields.io/badge/Streamlit-App-red?logo=streamlit)
 ![Flask](https://img.shields.io/badge/Flask-API-black?logo=flask)
 
-> **Live Demo (Flask)** → https://heart-disease-predictor-ft20.onrender.com/
+> **Live Demo (Flask)** 
 
 ---
 
