@@ -34,12 +34,19 @@ class HeartNet(nn.Module):
 
     def forward(self, x):
         return self.net(x)
-a
+
+
+class ModelUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == "__main__" and name == "HeartNet":
+            return HeartNet
+        return super().find_class(module, name)
+
 # ── Load model + scaler ───────────────────────────────────────────────────────
 
 try:
     with open('nn_model.pkl', 'rb') as f:
-        model = pickle.load(f)
+        model = ModelUnpickler(f).load()
     model.eval()
 
     with open('scaler.pkl', 'rb') as f:
